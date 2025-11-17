@@ -2,19 +2,33 @@ import requests
 import json
 import random
 import time
+import os
 from typing import Dict, List, Optional
 
+# Try to load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("python-dotenv not installed. Using default values or environment variables.")
+    print("To install: pip install python-dotenv")
+
 class PokemonCreatureGenerator:
-    def __init__(self, ollama_url: str = "http://lenovo-legion-5.andygeor.ge:11434/api/generate", model: str = "hf.co/unsloth/Qwen3-4B-Thinking-2507-GGUF:Q8_0"):
+    def __init__(self, ollama_url: Optional[str] = None, model: Optional[str] = None):
         """
         Initialize the Pokemon creature generator.
         
         Args:
-            ollama_url: URL of your Ollama instance
-            model: The model to use in Ollama
+            ollama_url: URL of your Ollama instance (will use OLLAMA_HOST from .env if not provided)
+            model: The model to use in Ollama (will use OLLAMA_MODEL from .env if not provided)
         """
-        self.ollama_url = ollama_url
-        self.model = model
+        # Use provided values, environment variables, or defaults
+        self.ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
+        self.model = model or os.getenv("OLLAMA_MODEL", "llama2")
+        
+        print(f"Using Ollama URL: {self.ollama_url}")
+        print(f"Using model: {self.model}")
+        
         self.creatures = []
         self.current_generation = 0
         
@@ -42,45 +56,28 @@ class PokemonCreatureGenerator:
             print(f"Error querying Ollama: {e}")
             return ""
     
-    def generate_creature(self, base_prompt: Optional[str] = None, evolution: Optional[Dict] = None) -> Dict:
+    def generate_creature(self, base_prompt: Optional[str] = None) -> Dict:
         """
         Generate a new Pokemon-like creature.
         
         Args:
             base_prompt: Optional custom prompt
-            evolution: Optional evolution data to base the new creature on
             
         Returns:
             A dictionary representing the generated creature
         """
         self.current_generation += 1
         
-        if evolution:
-            # Generate an evolution of an existing creature
-            prompt = f"""
-            Create an evolution of this Pokemon-like creature:
-            
-            Name: {evolution['name']}
-            Type: {evolution['type']}
-            Description: {evolution['description']}
-            Abilities: {evolution['abilities']}
-            Stats: {evolution['stats']}
-            
-            The evolution should be stronger and have some visual changes.
-            Provide the response in JSON format with these fields: name, type, description, abilities (array), stats (hp, attack, defense, speed), and evolution_level.
-            """
-        else:
-            # Generate a new creature from scratch
-            prompt = base_prompt or f"""
-            Create a unique Pokemon-like creature with the following characteristics:
-            - A creative name
-            - One or two types (e.g., Fire, Water, Grass, Electric, Psychic, etc.)
-            - A brief description of its appearance and behavior
-            - 2-3 special abilities
-            - Stats: HP, Attack, Defense, Speed (values between 30-100)
-            
-            Provide the response in JSON format with these fields: name, type, description, abilities (array), stats (hp, attack, defense, speed).
-            """
+        prompt = base_prompt or f"""
+        Create a unique Pokemon-like creature with the following characteristics:
+        - A creative name
+        - One or two types (e.g., Fire, Water, Grass, Electric, Psychic, etc.)
+        - A brief description of its appearance and behavior
+        - 2-3 special abilities
+        - Stats: HP, Attack, Defense, Speed (values between 30-100)
+        
+        Provide the response in JSON format with these fields: name, type, description, abilities (array), stats (hp, attack, defense, speed).
+        """
         
         response = self.query_ollama(prompt)
         
@@ -135,25 +132,19 @@ class PokemonCreatureGenerator:
                 "generation": self.current_generation
             }
     
-    def generate_battle_scenario(self, creature1_id: int, creature2_id: int) -> str:
+    def simulate_battle(self, creature1: Dict, creature2: Dict) -> Dict:
         """
-        Generate a battle scenario between two creatures.
+        Simulate a battle between two creatures by sending their stats to Ollama.
         
         Args:
-            creature1_id: ID of the first creature
-            creature2_id: ID of the second creature
+            creature1: The first creature
+            creature2: The second creature
             
         Returns:
-            A description of the battle scenario
+            A dictionary containing the battle result
         """
-        creature1 = self.get_creature_by_id(creature1_id)
-        creature2 = self.get_creature_by_id(creature2_id)
-        
-        if not creature1 or not creature2:
-            return "One or both creatures not found."
-            
         prompt = f"""
-        Create a brief battle scenario between these two Pokemon-like creatures:
+        Simulate a turn-by-turn battle between these two Pokemon-like creatures:
         
         Creature 1:
         Name: {creature1['name']}
@@ -167,49 +158,56 @@ class PokemonCreatureGenerator:
         Abilities: {creature2['abilities']}
         Stats: {creature2['stats']}
         
-        Describe how the battle would play out, considering their types, abilities, and stats.
+        Consider type advantages, stats, and abilities in your simulation.
+        Describe the battle in 3-5 turns, showing damage dealt and any special effects.
+        Declare a winner at the end.
+        
+        Provide the response in JSON format with these fields:
+        - battle_log: array of strings describing each turn
+        - winner: name of the winning creature
+        - turns: number of turns the battle lasted
         """
         
-        return self.query_ollama(prompt)
-    
-    def evolve_creature(self, creature_id: int) -> Optional[Dict]:
-        """
-        Evolve an existing creature.
+        response = self.query_ollama(prompt)
         
-        Args:
-            creature_id: ID of the creature to evolve
+        try:
+            # Extract JSON from the response
+            if "```json" in response:
+                json_str = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                json_str = response.split("```")[1].strip()
+            else:
+                json_str = response.strip()
+                
+            battle_result = json.loads(json_str)
             
-        Returns:
-            The evolved creature or None if the original creature wasn't found
-        """
-        creature = self.get_creature_by_id(creature_id)
-        if not creature:
-            return None
+            # Add metadata
+            battle_result["creature1_id"] = creature1["id"]
+            battle_result["creature2_id"] = creature2["id"]
+            battle_result["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
             
-        # Generate the evolution
-        evolution = self.generate_creature(evolution=creature)
-        
-        # Link the evolution to the original
-        evolution["evolved_from"] = creature_id
-        
-        return evolution
-    
-    def get_creature_by_id(self, creature_id: int) -> Optional[Dict]:
-        """
-        Get a creature by its ID.
-        
-        Args:
-            creature_id: ID of the creature
+            return battle_result
             
-        Returns:
-            The creature dictionary or None if not found
-        """
-        for creature in self.creatures:
-            if creature["id"] == creature_id:
-                return creature
-        return None
+        except json.JSONDecodeError:
+            print("Failed to parse battle JSON from response. Raw response:")
+            print(response)
+            
+            # Return a fallback battle result
+            winner = creature1["name"] if creature1["stats"]["attack"] > creature2["stats"]["attack"] else creature2["name"]
+            return {
+                "battle_log": [
+                    f"{creature1['name']} attacks {creature2['name']}!",
+                    f"{creature2['name']} retaliates!",
+                    f"The battle is intense!"
+                ],
+                "winner": winner,
+                "turns": 3,
+                "creature1_id": creature1["id"],
+                "creature2_id": creature2["id"],
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
     
-    def save_creatures(self, filename: str = "pokemon_creatures.json"):
+    def save_creatures_to_json(self, filename: str = "pokemon_creatures.json"):
         """
         Save all generated creatures to a JSON file.
         
@@ -219,26 +217,31 @@ class PokemonCreatureGenerator:
         with open(filename, "w") as f:
             json.dump(self.creatures, f, indent=2)
         print(f"Saved {len(self.creatures)} creatures to {filename}")
-    
-    def load_creatures(self, filename: str = "pokemon_creatures.json"):
+        
+    def save_battle_to_json(self, battle_result: Dict, filename: str = "pokemon_battles.json"):
         """
-        Load creatures from a JSON file.
+        Save a battle result to a JSON file.
         
         Args:
-            filename: The filename to load from
+            battle_result: The battle result dictionary
+            filename: The filename to save to
         """
+        battles = []
+        
+        # Try to load existing battles
         try:
             with open(filename, "r") as f:
-                self.creatures = json.load(f)
-            print(f"Loaded {len(self.creatures)} creatures from {filename}")
+                battles = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            battles = []
             
-            # Update current_generation based on loaded data
-            if self.creatures:
-                self.current_generation = max(c["generation"] for c in self.creatures)
-        except FileNotFoundError:
-            print(f"File {filename} not found. Starting with empty creature list.")
-            self.creatures = []
-            self.current_generation = 0
+        # Add the new battle
+        battles.append(battle_result)
+        
+        # Save all battles
+        with open(filename, "w") as f:
+            json.dump(battles, f, indent=2)
+        print(f"Saved battle to {filename}")
     
     def print_creature(self, creature: Dict):
         """
@@ -257,40 +260,49 @@ class PokemonCreatureGenerator:
         print("Stats:")
         for stat, value in creature['stats'].items():
             print(f"  - {stat.capitalize()}: {value}")
-        if "evolved_from" in creature:
-            print(f"Evolved from: Creature #{creature['evolved_from']}")
+        print("-" * 40)
+    
+    def print_battle(self, battle_result: Dict):
+        """
+        Print a battle result in a formatted way.
+        
+        Args:
+            battle_result: The battle result dictionary
+        """
+        print(f"\nBattle between Creature #{battle_result['creature1_id']} and Creature #{battle_result['creature2_id']}:")
+        print("-" * 40)
+        
+        for i, log_entry in enumerate(battle_result["battle_log"], 1):
+            print(f"Turn {i}: {log_entry}")
+            
+        print("-" * 40)
+        print(f"Winner: {battle_result['winner']} after {battle_result['turns']} turns!")
+        print(f"Battle took place on {battle_result['timestamp']}")
         print("-" * 40)
 
 # Example usage
 if __name__ == "__main__":
-    # Initialize the generator
+    # Initialize the generator with environment variables from .env
     generator = PokemonCreatureGenerator()
     
-    # Try to load existing creatures
-    generator.load_creatures()
+    # Generate two creatures
+    print("Generating two creatures for battle...")
+    creature1 = generator.generate_creature()
+    generator.print_creature(creature1)
+    time.sleep(1)  # Add a small delay to avoid overwhelming Ollama
     
-    # Generate a few new creatures
-    print("Generating new creatures...")
-    for i in range(3):
-        creature = generator.generate_creature()
-        generator.print_creature(creature)
-        time.sleep(1)  # Add a small delay to avoid overwhelming Ollama
+    creature2 = generator.generate_creature()
+    generator.print_creature(creature2)
+    time.sleep(1)
     
-    # Evolve one of the creatures
-    if generator.creatures:
-        print(f"Evolving creature #{generator.creatures[0]['id']}...")
-        evolution = generator.evolve_creature(generator.creatures[0]['id'])
-        if evolution:
-            generator.print_creature(evolution)
+    # Save creatures to JSON
+    generator.save_creatures_to_json()
     
-    # Generate a battle scenario between the first two creatures
-    if len(generator.creatures) >= 2:
-        print("\nBattle scenario:")
-        battle = generator.generate_battle_scenario(
-            generator.creatures[0]['id'], 
-            generator.creatures[1]['id']
-        )
-        print(battle)
+    # Simulate a battle between the two creatures
+    print("\nSimulating battle...")
+    battle_result = generator.simulate_battle(creature1, creature2)
+    generator.print_battle(battle_result)
     
-    # Save all creatures
-    generator.save_creatures()
+    # Save the battle result to JSON
+    generator.save_battle_to_json(battle_result)
+    
