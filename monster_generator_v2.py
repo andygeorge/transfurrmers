@@ -34,6 +34,14 @@ class OllamaMonsterGenerator:
         self.model = model
         self.debug = debug
         self.monsters_created = []
+    
+    def strip_thinking_blocks(self, text: str) -> str:
+        """Remove <thinking> blocks from response (for thinking models)"""
+        # Remove everything between <thinking> and </thinking> tags
+        cleaned = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Also handle self-closing or malformed tags  
+        cleaned = re.sub(r'<thinking[^>]*>.*?(?:</thinking>|$)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        return cleaned.strip()
         
     def query_ollama(self, prompt: str, temperature: float = 0.8) -> str:
         """Send a prompt to Ollama and get the response"""
@@ -50,7 +58,7 @@ class OllamaMonsterGenerator:
         }
         
         try:
-            response = requests.post(url, json=payload, timeout=600)
+            response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             result = response.json()["response"]
             
@@ -96,8 +104,6 @@ EVOLUTION: [1, 2, or 3]
 RARITY: [Common, Uncommon, Rare, Epic, or Legendary]
 
 Keep it simple and follow the format exactly."""
-
-        print(prompt)
         
         return prompt
     
@@ -386,8 +392,8 @@ def main():
     
     # Initialize generator
     generator = OllamaMonsterGenerator(
-        base_url="http://lenovo-legion-5.andygeor.ge:11434",
-        model="hf.co/unsloth/Qwen3-4B-Thinking-2507-GGUF:Q8_0",  # Change to your model
+        # base_url="http://localhost:11434",
+        # model="llama3.2",  # Change to your model
         debug=debug_mode
     )
     
@@ -399,6 +405,7 @@ def main():
         print("   Please make sure Ollama is running:")
         print("   → ollama serve")
         return
+    print(test_response)
     print("✅ Connected to Ollama\n")
     
     # Generate monsters
